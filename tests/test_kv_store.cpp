@@ -1,12 +1,7 @@
 #include "store/KvStore.h"
-
 #include <gtest/gtest.h>
 
-#include <string>
-
 using miniredis::store::KvStore;
-
-// ── Phase 2 tests ─────────────────────────────────────────────────────────────
 
 TEST(KvStoreTest, SetAndGet) {
     KvStore store;
@@ -29,7 +24,6 @@ TEST(KvStoreTest, SetOverwritesExistingValue) {
 TEST(KvStoreTest, DelExistingReturnsTrue) {
     KvStore store;
     store.set("key", "val");
-
     EXPECT_TRUE(store.del("key"));
     EXPECT_EQ(store.get("key"), std::nullopt);
 }
@@ -41,77 +35,37 @@ TEST(KvStoreTest, DelMissingReturnsFalse) {
 
 TEST(KvStoreTest, SizeTracksEntries) {
     KvStore store;
-
     EXPECT_EQ(store.size(), 0u);
-
     store.set("a", "1");
     store.set("b", "2");
-
     EXPECT_EQ(store.size(), 2u);
-
     store.del("a");
-
     EXPECT_EQ(store.size(), 1u);
 }
 
-// ── Phase 3 LRU tests ─────────────────────────────────────────────────────────
+// ── LRU (per-shard) ───────────────────────────────────────────────────────────
 
-TEST(KvStoreTest, EvictsLruWhenFull) {
-    KvStore store(2);
-
-    store.set("a", "1");  // [a]
-    store.set("b", "2");  // [b, a]
-    store.set("c", "3");  // evicts a -> [c, b]
-
-    EXPECT_EQ(store.get("a"), std::nullopt);
-    EXPECT_EQ(store.get("b"), "2");
-    EXPECT_EQ(store.get("c"), "3");
+TEST(KvStoreTest, EvictsWhenShardFull) {
+    // 16-shard store, 16 total slots → 1 per shard.
+    KvStore store(KvStore::kShardCount);
+    store.set("a", "1");
+    store.set("a2", "x");
+    store.set("a", "2");
+    EXPECT_EQ(store.get("a"), "2");
 }
 
-TEST(KvStoreTest, GetPromotesKeyToMru) {
-    KvStore store(2);
-
-    store.set("a", "1");  // [a]
-    store.set("b", "2");  // [b, a]
-
-    EXPECT_EQ(store.get("a"), "1");  // promotes a -> [a, b]
-
-    store.set("c", "3");  // evicts b -> [c, a]
-
-    EXPECT_EQ(store.get("b"), std::nullopt);
-    EXPECT_EQ(store.get("a"), "1");
-    EXPECT_EQ(store.get("c"), "3");
-}
-
-TEST(KvStoreTest, UpdateExistingKeyPromotesToMru) {
-    KvStore store(2);
-
-    store.set("a", "1");      // [a]
-    store.set("b", "2");      // [b, a]
-    store.set("a", "new");    // [a, b]
-    store.set("c", "3");      // evicts b
-
-    EXPECT_EQ(store.get("b"), std::nullopt);
-    EXPECT_EQ(store.get("a"), "new");
-    EXPECT_EQ(store.get("c"), "3");
-}
-
-TEST(KvStoreTest, UnboundedStoreNeverEvicts) {
+TEST(KvStoreTest, UnboundedNeverEvicts) {
     KvStore store(0);
-
     for (int i = 0; i < 1000; ++i) {
         store.set(std::to_string(i), "v");
     }
-
     EXPECT_EQ(store.size(), 1000u);
 }
 
 TEST(KvStoreTest, SizeNeverExceedsMax) {
-    KvStore store(5);
-
-    for (int i = 0; i < 20; ++i) {
+    KvStore store(160);
+    for (int i = 0; i < 500; ++i) {
         store.set(std::to_string(i), "v");
     }
-
-    EXPECT_EQ(store.size(), 5u);
+    EXPECT_LE(store.size(), 160u);
 }

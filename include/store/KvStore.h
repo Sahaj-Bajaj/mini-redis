@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <list>
 #include <mutex>
 #include <optional>
@@ -8,10 +9,14 @@
 
 namespace miniredis::store {
 
-// Thread-safe key-value store with LRU eviction.
-// Uses a single mutex; Phase 5 replaces this with per-shard locking.
+// Sharded key-value store with per-shard LRU eviction and lock striping.
+// Keys are distributed across shards by hash; each shard owns its mutex,
+// so threads operating on different keys never contend.
 class KvStore {
 public:
+    static constexpr std::size_t kShardCount = 16;
+
+    // maxSize: total key cap across all shards (0 = unbounded).
     explicit KvStore(std::size_t maxSize = 0) noexcept;
 
     void set(const std::string& key, std::string value);
@@ -27,14 +32,24 @@ private:
         std::list<std::string>::iterator lruIt;
     };
 
-    std::list<std::string>                 lruOrder_;
-    std::unordered_map<std::string, Entry> data_;
-    std::size_t                            maxSize_;
-    mutable std::mutex                     mutex_;
+    struct Shard {
+        mutable std::mutex mutex;
+        std::list<std::string> lruOrder;
+        std::unordered_map<std::string, Entry> data;
+    };
 
-    // Must be called with mutex_ held.
-    void moveToFront(std::unordered_map<std::string, Entry>::iterator it);
-    void evictLru();
+    std::array<Shard, kShardCount> shards_;
+    std::size_t maxPerShard_;
+    std::size_t maxSize_;
+
+    [[nodiscard]] std::size_t shardIndex(const std::string& key) const noexcept;
+
+    // Must be called with the shard's mutex held.
+    void moveToFront(
+        Shard& shard,
+        std::unordered_map<std::string, Entry>::iterator it);
+
+    void evictLru(Shard& shard);
 };
 
 } // namespace miniredis::store

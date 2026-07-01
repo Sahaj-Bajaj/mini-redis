@@ -1,64 +1,84 @@
 #include "store/KvStore.h"
 
+#include <functional>
+
 namespace miniredis::store {
 
-KvStore::KvStore(std::size_t maxSize) noexcept : maxSize_(maxSize) {}
+KvStore::KvStore(std::size_t maxSize) noexcept
+    : maxPerShard_(maxSize == 0 ? 0 : (maxSize + kShardCount - 1) / kShardCount),
+      maxSize_(maxSize) {}
 
-void KvStore::moveToFront(std::unordered_map<std::string, Entry>::iterator it) {
-    lruOrder_.splice(lruOrder_.begin(), lruOrder_, it->second.lruIt);
+std::size_t KvStore::shardIndex(const std::string& key) const noexcept {
+    // Power-of-2 shard count lets us use bitmask instead of modulo.
+    return std::hash<std::string>{}(key) & (kShardCount - 1);
 }
 
-void KvStore::evictLru() {
-    data_.erase(lruOrder_.back());
-    lruOrder_.pop_back();
+void KvStore::moveToFront(
+    Shard& shard,
+    std::unordered_map<std::string, Entry>::iterator it) {
+    shard.lruOrder.splice(shard.lruOrder.begin(), shard.lruOrder, it->second.lruIt);
+}
+
+void KvStore::evictLru(Shard& shard) {
+    shard.data.erase(shard.lruOrder.back());
+    shard.lruOrder.pop_back();
 }
 
 void KvStore::set(const std::string& key, std::string value) {
-    std::scoped_lock lock(mutex_);
+    Shard& shard = shards_[shardIndex(key)];
+    std::scoped_lock lock(shard.mutex);
 
-    auto it = data_.find(key);
-    if (it != data_.end()) {
+    auto it = shard.data.find(key);
+    if (it != shard.data.end()) {
         it->second.value = std::move(value);
-        moveToFront(it);
+        moveToFront(shard, it);
         return;
     }
 
-    if (maxSize_ > 0 && data_.size() == maxSize_) {
-        evictLru();
+    if (maxPerShard_ > 0 && shard.data.size() == maxPerShard_) {
+        evictLru(shard);
     }
 
-    lruOrder_.push_front(key);
-    data_.emplace(key, Entry{std::move(value), lruOrder_.begin()});
+    shard.lruOrder.push_front(key);
+    shard.data.emplace(key, Entry{std::move(value), shard.lruOrder.begin()});
 }
 
 std::optional<std::string> KvStore::get(const std::string& key) {
-    std::scoped_lock lock(mutex_);
+    Shard& shard = shards_[shardIndex(key)];
+    std::scoped_lock lock(shard.mutex);
 
-    auto it = data_.find(key);
-    if (it == data_.end()) {
+    auto it = shard.data.find(key);
+    if (it == shard.data.end()) {
         return std::nullopt;
     }
 
-    moveToFront(it);
+    moveToFront(shard, it);
     return it->second.value;
 }
 
 bool KvStore::del(const std::string& key) {
-    std::scoped_lock lock(mutex_);
+    Shard& shard = shards_[shardIndex(key)];
+    std::scoped_lock lock(shard.mutex);
 
-    auto it = data_.find(key);
-    if (it == data_.end()) {
+    auto it = shard.data.find(key);
+    if (it == shard.data.end()) {
         return false;
     }
 
-    lruOrder_.erase(it->second.lruIt);
-    data_.erase(it);
+    shard.lruOrder.erase(it->second.lruIt);
+    shard.data.erase(it);
     return true;
 }
 
 std::size_t KvStore::size() const noexcept {
-    std::scoped_lock lock(mutex_);
-    return data_.size();
+    std::size_t total = 0;
+
+    for (const auto& shard : shards_) {
+        std::scoped_lock lock(shard.mutex);
+        total += shard.data.size();
+    }
+
+    return total;
 }
 
 std::size_t KvStore::maxSize() const noexcept {
