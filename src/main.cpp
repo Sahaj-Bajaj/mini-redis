@@ -124,7 +124,7 @@ void runCommandLoop(miniredis::net::Socket& client,
 int main() {
     try {
         miniredis::net::TcpListener listener(kPort);
-        miniredis::store::KvStore store;
+        miniredis::store::KvStore store(1024);
 
         std::cout << "MiniRedis listening on port " << kPort << '\n';
 

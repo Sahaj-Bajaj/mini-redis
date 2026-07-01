@@ -2,9 +2,7 @@
 
 A Redis-inspired in-memory key-value cache server, built incrementally in modern C++20.
 
-## Status
-
-**Phase 2 Complete**
+**Phase 3 Complete**
 
 Implemented:
 
@@ -12,6 +10,9 @@ Implemented:
 - Persistent client connections
 - Text-based command protocol
 - Single-threaded in-memory key-value store
+- O(1) LRU cache using `std::list` + `std::unordered_map`
+- Configurable bounded cache capacity
+- Automatic least recently used (LRU) eviction
 - `SET`
 - `GET`
 - `DEL`
@@ -74,7 +75,7 @@ NULL
 
 - [x] Phase 1 -- TCP listener and single-client echo server
 - [x] Phase 2 -- Text protocol, `SET`/`GET`/`DEL`, single-threaded key-value store
-- [ ] Phase 3 -- O(1) LRU eviction and bounded cache
+- [x] Phase 3 -- O(1) LRU eviction and bounded cache
 - [ ] Phase 4 -- Thread pool and concurrent client handling
 - [ ] Phase 5 -- Sharded key-value store and lock striping
 - [ ] Phase 6 -- TTL expiration and background cleanup
