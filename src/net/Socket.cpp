@@ -4,7 +4,7 @@
 
 #include <utility>
 
-namespace cache::net {
+namespace miniredis::net {
 
 Socket::Socket(int fd) noexcept : fd_(fd) {}
 
@@ -39,4 +39,4 @@ void Socket::close() noexcept {
     }
 }
 
-}  // namespace cache::net
+}  // namespace miniredis::net

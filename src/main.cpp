@@ -18,7 +18,7 @@ constexpr std::size_t kBufferSize = 4096;
 
 // Reads from the client and writes back exactly what was read, until the
 // client closes the connection or an error occurs.
-void runEchoLoop(cache::net::Socket& client) {
+void runEchoLoop(miniredis::net::Socket& client) {
     std::array<char, kBufferSize> buffer{};
 
     while (true) {
@@ -36,9 +36,9 @@ void runEchoLoop(cache::net::Socket& client) {
         std::size_t totalSent = 0;
         while (totalSent < static_cast<std::size_t>(bytesRead)) {
             ssize_t bytesSent = ::send(client.fd(),
-                                        buffer.data() + totalSent,
-                                        static_cast<std::size_t>(bytesRead) - totalSent,
-                                        MSG_NOSIGNAL);
+                                       buffer.data() + totalSent,
+                                       static_cast<std::size_t>(bytesRead) - totalSent,
+                                       MSG_NOSIGNAL);
             if (bytesSent < 0) {
                 std::cerr << "send() failed: " << std::strerror(errno) << '\n';
                 return;
@@ -52,12 +52,12 @@ void runEchoLoop(cache::net::Socket& client) {
 
 int main() {
     try {
-        cache::net::TcpListener listener(kPort);
-        std::cout << "cache_server listening on port " << kPort << '\n';
+        miniredis::net::TcpListener listener(kPort);
+        std::cout << "MiniRedis listening on port " << kPort << '\n';
 
         while (true) {
             std::cout << "Waiting for a client...\n";
-            cache::net::Socket client = listener.accept();
+            miniredis::net::Socket client = listener.accept();
             std::cout << "Client connected.\n";
 
             runEchoLoop(client);

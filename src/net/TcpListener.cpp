@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace cache::net {
+namespace miniredis::net {
 
 namespace {
 
@@ -67,4 +67,4 @@ Socket TcpListener::accept() {
     return Socket(clientFd);
 }
 
-}  // namespace cache::net
+}  // namespace miniredis::net

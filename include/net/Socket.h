@@ -1,6 +1,6 @@
 #pragma once
 
-namespace cache::net {
+namespace miniredis::net {
 
 // Owns a single POSIX file descriptor for a socket. Guarantees the fd is
 // closed exactly once, regardless of how the owning scope is exited.
@@ -25,4 +25,4 @@ private:
     int fd_ = -1;
 };
 
-}  // namespace cache::net
+}  // namespace miniredis::net

@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-namespace cache::net {
+namespace miniredis::net {
 
 // Owns a listening TCP socket bound to a port on all local interfaces.
 // Responsible only for accepting connections -- it has no knowledge of
@@ -26,4 +26,4 @@ private:
     Socket listenSocket_;
 };
 
-}  // namespace cache::net
+}  // namespace miniredis::net

@@ -1,4 +1,4 @@
-# cache-server
+# MiniRedis
 
 A Redis-inspired in-memory key-value cache server, built incrementally in modern C++20.
 
@@ -13,7 +13,7 @@ A Redis-inspired in-memory key-value cache server, built incrementally in modern
 
 ## Run
 
-    ./build/cache_server
+    ./build/miniredis
 
 Listens on port 6380. Connect with `nc localhost 6380` — anything typed is echoed back.
 
