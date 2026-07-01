@@ -9,14 +9,14 @@ void KvStore::moveToFront(std::unordered_map<std::string, Entry>::iterator it) {
 }
 
 void KvStore::evictLru() {
-    const std::string& lruKey = lruOrder_.back();
-    data_.erase(lruKey);
+    data_.erase(lruOrder_.back());
     lruOrder_.pop_back();
 }
 
 void KvStore::set(const std::string& key, std::string value) {
-    auto it = data_.find(key);
+    std::scoped_lock lock(mutex_);
 
+    auto it = data_.find(key);
     if (it != data_.end()) {
         it->second.value = std::move(value);
         moveToFront(it);
@@ -32,8 +32,9 @@ void KvStore::set(const std::string& key, std::string value) {
 }
 
 std::optional<std::string> KvStore::get(const std::string& key) {
-    auto it = data_.find(key);
+    std::scoped_lock lock(mutex_);
 
+    auto it = data_.find(key);
     if (it == data_.end()) {
         return std::nullopt;
     }
@@ -43,8 +44,9 @@ std::optional<std::string> KvStore::get(const std::string& key) {
 }
 
 bool KvStore::del(const std::string& key) {
-    auto it = data_.find(key);
+    std::scoped_lock lock(mutex_);
 
+    auto it = data_.find(key);
     if (it == data_.end()) {
         return false;
     }
@@ -55,6 +57,7 @@ bool KvStore::del(const std::string& key) {
 }
 
 std::size_t KvStore::size() const noexcept {
+    std::scoped_lock lock(mutex_);
     return data_.size();
 }
 
@@ -62,4 +65,4 @@ std::size_t KvStore::maxSize() const noexcept {
     return maxSize_;
 }
 
-}  // namespace miniredis::store
+} // namespace miniredis::store

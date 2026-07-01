@@ -1,11 +1,12 @@
 #include "net/Socket.h"
 #include "net/TcpListener.h"
+#include "net/ThreadPool.h"
 #include "protocol/Command.h"
 #include "protocol/CommandParser.h"
 #include "store/KvStore.h"
+#include <memory>
 
 #include <sys/socket.h>
-#include <sys/types.h>
 
 #include <array>
 #include <cerrno>
@@ -17,130 +18,116 @@
 
 namespace {
 
-constexpr uint16_t kPort = 6380;  // 6380, not 6379, to avoid colliding with a real Redis instance.
+constexpr uint16_t kPort = 6380;
 constexpr std::size_t kBufferSize = 4096;
+constexpr std::size_t kThreadCount = 4;
+constexpr std::size_t kMaxKeys = 1024;
 
-// Sends every byte in the response.
-void sendAll(miniredis::net::Socket& client, const std::string& response) {
-    std::size_t totalSent = 0;
+void sendAll(miniredis::net::Socket& socket, const std::string& data) {
+    std::size_t sent = 0;
 
-    while (totalSent < response.size()) {
-        const ssize_t bytesSent = ::send(
-            client.fd(),
-            response.data() + totalSent,
-            response.size() - totalSent,
+    while (sent < data.size()) {
+        ssize_t n = ::send(
+            socket.fd(),
+            data.data() + sent,
+            data.size() - sent,
             MSG_NOSIGNAL);
 
-        if (bytesSent < 0) {
-            std::cerr << "send() failed: "
-                      << std::strerror(errno)
-                      << '\n';
+        if (n < 0) {
+            std::cerr << "send() failed: " << std::strerror(errno) << '\n';
             return;
         }
 
-        totalSent += static_cast<std::size_t>(bytesSent);
+        sent += static_cast<std::size_t>(n);
     }
 }
 
-// Reads commands from the client, executes them against the key-value store,
-// and sends back a text response.
-void runCommandLoop(miniredis::net::Socket& client,
-                    miniredis::store::KvStore& store) {
-    std::array<char, kBufferSize> chunk{};
+std::string execute(
+    const miniredis::protocol::Command& cmd,
+    miniredis::store::KvStore& store) {
+
+    using miniredis::protocol::CommandType;
+
+    switch (cmd.type) {
+        case CommandType::Set:
+            store.set(cmd.args[0], cmd.args[1]);
+            return "OK\r\n";
+
+        case CommandType::Get: {
+            auto value = store.get(cmd.args[0]);
+            return value ? ("VALUE " + *value + "\r\n") : "NOT_FOUND\r\n";
+        }
+
+        case CommandType::Del:
+            return store.del(cmd.args[0])
+                ? "DELETED\r\n"
+                : "NOT_FOUND\r\n";
+
+        case CommandType::Unknown:
+        default:
+            return "ERROR unknown command\r\n";
+    }
+}
+
+// Client socket is moved into the lambda so it's owned by the worker thread.
+void serveClient(
+    miniredis::net::Socket client,
+    miniredis::store::KvStore& store) {
+
     std::string buffer;
+    std::array<char, kBufferSize> chunk{};
 
     while (true) {
-        const ssize_t bytesRead =
-            ::recv(client.fd(), chunk.data(), chunk.size(), 0);
+        ssize_t n = ::recv(client.fd(), chunk.data(), chunk.size(), 0);
 
-        if (bytesRead < 0) {
-            std::cerr << "recv() failed: "
-                      << std::strerror(errno)
-                      << '\n';
+        if (n <= 0) {
             return;
         }
 
-        if (bytesRead == 0) {
-            return;
-        }
+        buffer.append(chunk.data(), static_cast<std::size_t>(n));
 
-        buffer.append(chunk.data(),
-                      static_cast<std::size_t>(bytesRead));
+        std::size_t pos;
 
-        std::size_t newlinePos;
-
-        while ((newlinePos = buffer.find('\n')) != std::string::npos) {
-
-            std::string line = buffer.substr(0, newlinePos);
+        while ((pos = buffer.find('\n')) != std::string::npos) {
+            std::string line = buffer.substr(0, pos);
 
             if (!line.empty() && line.back() == '\r') {
                 line.pop_back();
             }
 
-            buffer.erase(0, newlinePos + 1);
+            buffer.erase(0, pos + 1);
 
-            const auto command =
-                miniredis::protocol::CommandParser::parse(line);
-
-            std::string response;
-
-            using miniredis::protocol::CommandType;
-
-            switch (command.type) {
-                case CommandType::Set:
-                    store.set(command.args[0], command.args[1]);
-                    response = "OK\n";
-                    break;
-
-                case CommandType::Get: {
-                    const auto value = store.get(command.args[0]);
-
-                    if (value) {
-                        response = *value + "\n";
-                    } else {
-                        response = "NULL\n";
-                    }
-
-                    break;
-                }
-
-                case CommandType::Del:
-                    response = store.del(command.args[0]) ? "1\n" : "0\n";
-                    break;
-
-                case CommandType::Unknown:
-                default:
-                    response = "ERR unknown command\n";
-                    break;
-            }
-
-            sendAll(client, response);
+            auto cmd = miniredis::protocol::CommandParser::parse(line);
+            sendAll(client, execute(cmd, store));
         }
     }
 }
 
-}  // namespace
+} // namespace
 
 int main() {
     try {
         miniredis::net::TcpListener listener(kPort);
-        miniredis::store::KvStore store(1024);
+        miniredis::net::ThreadPool pool(kThreadCount);
+        miniredis::store::KvStore store(kMaxKeys);
 
-        std::cout << "MiniRedis listening on port " << kPort << '\n';
+        std::cout << "miniredis listening on port "
+                  << kPort
+                  << " ("
+                  << kThreadCount
+                  << " worker threads)\n";
 
         while (true) {
-            std::cout << "Waiting for a client...\n";
+            auto client = std::make_shared<miniredis::net::Socket>(listener.accept());
 
-            miniredis::net::Socket client = listener.accept();
-
-            std::cout << "Client connected.\n";
-
-            runCommandLoop(client, store);
-
-            std::cout << "Client disconnected.\n";
+pool.enqueue(
+    [&store, client]() {
+        serveClient(std::move(*client), store);
+    });
         }
+
     } catch (const std::exception& e) {
-        std::cerr << "Fatal error: " << e.what() << '\n';
+        std::cerr << "Fatal: " << e.what() << '\n';
         return 1;
     }
 }
