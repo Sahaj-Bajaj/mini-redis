@@ -2,7 +2,7 @@
 
 A Redis-inspired in-memory key-value cache server built incrementally in modern **C++20** to learn systems programming, networking, concurrency, and backend engineering concepts.
 
-**Current Status: Phase 4 Complete**
+**Current Status: Phase 5 Complete**
 
 ## Features
 
@@ -12,9 +12,10 @@ Implemented so far:
 * Persistent client connections
 * Fixed-size thread pool
 * Concurrent client handling
-* Thread-safe in-memory key-value store
+* **Sharded** thread-safe in-memory key-value store
+* Lock striping with per-shard mutexes
 * Text-based command protocol
-* O(1) LRU cache using `std::list` + `std::unordered_map`
+* O(1) per-shard LRU cache using `std::list` + `std::unordered_map`
 * Configurable cache capacity
 * Automatic Least Recently Used (LRU) eviction
 * Commands:
@@ -45,7 +46,7 @@ Connect using:
 nc localhost 6380
 ```
 
-Multiple clients can connect simultaneously. Requests are handled by a fixed-size worker thread pool while sharing a single thread-safe cache.
+Multiple clients can connect simultaneously. Requests are handled by a fixed-size worker thread pool while keys are distributed across multiple shards using lock striping to reduce contention.
 
 ## Running Tests
 
@@ -105,9 +106,18 @@ NOT_FOUND
                         |
                         v
                 +----------------+
-                |    KvStore     |
-                |  (Mutex + LRU) |
-                +----------------+
+                | Sharded KvStore|
+                | (16 Shards)    |
+                +-------+--------+
+                        |
+          +-------------+-------------+
+          |             |             |
+          v             v             v
+      +-------+     +-------+     +-------+
+      |Shard 0| ... |Shard 7| ... |Shard15|
+      |Map+LRU|     |Map+LRU|     |Map+LRU|
+      |Mutex  |     |Mutex  |     |Mutex  |
+      +-------+     +-------+     +-------+
 ```
 
 ## Roadmap
@@ -116,7 +126,7 @@ NOT_FOUND
 * [x] Phase 2 — Text protocol and key-value store (`SET`, `GET`, `DEL`)
 * [x] Phase 3 — O(1) LRU cache and bounded capacity
 * [x] Phase 4 — Thread pool and concurrent client handling
-* [ ] Phase 5 — Sharded key-value store and lock striping
+* [x] Phase 5 — Sharded key-value store and lock striping
 * [ ] Phase 6 — TTL expiration and background cleanup
 * [ ] Phase 7 — INFO and administrative commands
 * [ ] Phase 8 — Benchmarking and performance analysis

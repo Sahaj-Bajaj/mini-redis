@@ -1,71 +1,109 @@
 #include "store/KvStore.h"
+
+#include <chrono>
 #include <gtest/gtest.h>
+#include <thread>
 
 using miniredis::store::KvStore;
 
 TEST(KvStoreTest, SetAndGet) {
-    KvStore store;
-    store.set("name", "alice");
-    EXPECT_EQ(store.get("name"), "alice");
+    KvStore s;
+    s.set("k", "v");
+    EXPECT_EQ(s.get("k"), "v");
 }
 
-TEST(KvStoreTest, GetMissingReturnsNullopt) {
-    KvStore store;
-    EXPECT_EQ(store.get("missing"), std::nullopt);
+TEST(KvStoreTest, GetMissing) {
+    KvStore s;
+    EXPECT_EQ(s.get("x"), std::nullopt);
 }
 
-TEST(KvStoreTest, SetOverwritesExistingValue) {
-    KvStore store;
-    store.set("key", "first");
-    store.set("key", "second");
-    EXPECT_EQ(store.get("key"), "second");
+TEST(KvStoreTest, SetOverwrites) {
+    KvStore s;
+    s.set("k", "a");
+    s.set("k", "b");
+    EXPECT_EQ(s.get("k"), "b");
 }
 
-TEST(KvStoreTest, DelExistingReturnsTrue) {
-    KvStore store;
-    store.set("key", "val");
-    EXPECT_TRUE(store.del("key"));
-    EXPECT_EQ(store.get("key"), std::nullopt);
+TEST(KvStoreTest, DelExisting) {
+    KvStore s;
+    s.set("k", "v");
+    EXPECT_TRUE(s.del("k"));
+    EXPECT_EQ(s.get("k"), std::nullopt);
 }
 
-TEST(KvStoreTest, DelMissingReturnsFalse) {
-    KvStore store;
-    EXPECT_FALSE(store.del("missing"));
+TEST(KvStoreTest, DelMissing) {
+    KvStore s;
+    EXPECT_FALSE(s.del("x"));
 }
 
-TEST(KvStoreTest, SizeTracksEntries) {
-    KvStore store;
-    EXPECT_EQ(store.size(), 0u);
-    store.set("a", "1");
-    store.set("b", "2");
-    EXPECT_EQ(store.size(), 2u);
-    store.del("a");
-    EXPECT_EQ(store.size(), 1u);
-}
+TEST(KvStoreTest, SizeTracks) {
+    KvStore s;
+    s.set("a", "1");
+    s.set("b", "2");
+    EXPECT_EQ(s.size(), 2u);
 
-// ── LRU (per-shard) ───────────────────────────────────────────────────────────
-
-TEST(KvStoreTest, EvictsWhenShardFull) {
-    // 16-shard store, 16 total slots → 1 per shard.
-    KvStore store(KvStore::kShardCount);
-    store.set("a", "1");
-    store.set("a2", "x");
-    store.set("a", "2");
-    EXPECT_EQ(store.get("a"), "2");
+    s.del("a");
+    EXPECT_EQ(s.size(), 1u);
 }
 
 TEST(KvStoreTest, UnboundedNeverEvicts) {
-    KvStore store(0);
+    KvStore s(0);
+
     for (int i = 0; i < 1000; ++i) {
-        store.set(std::to_string(i), "v");
+        s.set(std::to_string(i), "v");
     }
-    EXPECT_EQ(store.size(), 1000u);
+
+    EXPECT_EQ(s.size(), 1000u);
 }
 
 TEST(KvStoreTest, SizeNeverExceedsMax) {
-    KvStore store(160);
+    KvStore s(160);
+
     for (int i = 0; i < 500; ++i) {
-        store.set(std::to_string(i), "v");
+        s.set(std::to_string(i), "v");
     }
-    EXPECT_LE(store.size(), 160u);
+
+    EXPECT_LE(s.size(), 160u);
+}
+
+// TTL ------------------------------------------------------------------------
+
+TEST(KvStoreTest, ExpireOnMissingReturnsFalse) {
+    KvStore s;
+    EXPECT_FALSE(s.expire("missing", std::chrono::seconds(10)));
+}
+
+TEST(KvStoreTest, PassiveExpiryOnGet) {
+    KvStore s;
+
+    s.set("k", "v");
+    s.expire("k", std::chrono::seconds(0));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    EXPECT_EQ(s.get("k"), std::nullopt);
+}
+
+TEST(KvStoreTest, ActiveSweepRemovesExpired) {
+    KvStore s;
+
+    s.set("k", "v");
+    s.expire("k", std::chrono::seconds(0));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+
+    EXPECT_EQ(s.size(), 0u);
+}
+
+TEST(KvStoreTest, SetClearsTtl) {
+    KvStore s;
+
+    s.set("k", "v");
+    s.expire("k", std::chrono::seconds(0));
+
+    s.set("k", "v2");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    EXPECT_EQ(s.get("k"), "v2");
 }

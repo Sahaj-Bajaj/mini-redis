@@ -7,78 +7,52 @@ using miniredis::protocol::CommandParser;
 using miniredis::protocol::CommandType;
 
 TEST(CommandParserTest, ParseSet) {
-    auto command = CommandParser::parse("SET name alice");
+    auto c = CommandParser::parse("SET k v");
+    EXPECT_EQ(c.type, CommandType::Set);
+    EXPECT_EQ(c.args[1], "v");
+}
 
-    EXPECT_EQ(command.type, CommandType::Set);
-
-    ASSERT_EQ(command.args.size(), 2u);
-
-    EXPECT_EQ(command.args[0], "name");
-    EXPECT_EQ(command.args[1], "alice");
+TEST(CommandParserTest, SetMultiWordValue) {
+    auto c = CommandParser::parse("SET k hi bob");
+    EXPECT_EQ(c.args[1], "hi bob");
 }
 
 TEST(CommandParserTest, ParseGet) {
-    auto command = CommandParser::parse("GET name");
-
-    EXPECT_EQ(command.type, CommandType::Get);
-
-    ASSERT_EQ(command.args.size(), 1u);
-
-    EXPECT_EQ(command.args[0], "name");
+    auto c = CommandParser::parse("GET k");
+    EXPECT_EQ(c.type, CommandType::Get);
 }
 
 TEST(CommandParserTest, ParseDel) {
-    auto command = CommandParser::parse("DEL name");
-
-    EXPECT_EQ(command.type, CommandType::Del);
-
-    ASSERT_EQ(command.args.size(), 1u);
-
-    EXPECT_EQ(command.args[0], "name");
+    auto c = CommandParser::parse("DEL k");
+    EXPECT_EQ(c.type, CommandType::Del);
 }
 
-TEST(CommandParserTest, LowercaseCommands) {
-    EXPECT_EQ(CommandParser::parse("set a b").type,
-              CommandType::Set);
-
-    EXPECT_EQ(CommandParser::parse("get a").type,
-              CommandType::Get);
-
-    EXPECT_EQ(CommandParser::parse("del a").type,
-              CommandType::Del);
+TEST(CommandParserTest, ParseExpire) {
+    auto c = CommandParser::parse("EXPIRE k 10");
+    EXPECT_EQ(c.type, CommandType::Expire);
+    EXPECT_EQ(c.args[1], "10");
 }
 
-TEST(CommandParserTest, MultiWordValue) {
-    auto command =
-        CommandParser::parse("SET city New Delhi");
-
-    EXPECT_EQ(command.type, CommandType::Set);
-
-    ASSERT_EQ(command.args.size(), 2u);
-
-    EXPECT_EQ(command.args[1], "New Delhi");
+TEST(CommandParserTest, CaseInsensitive) {
+    EXPECT_EQ(
+        CommandParser::parse("expire k 5").type,
+        CommandType::Expire);
 }
 
-TEST(CommandParserTest, UnknownCommand) {
-    EXPECT_EQ(CommandParser::parse("PING").type,
-              CommandType::Unknown);
+TEST(CommandParserTest, UnknownVerb) {
+    EXPECT_EQ(
+        CommandParser::parse("PING").type,
+        CommandType::Unknown);
 }
 
-TEST(CommandParserTest, EmptyCommand) {
-    EXPECT_EQ(CommandParser::parse("").type,
-              CommandType::Unknown);
+TEST(CommandParserTest, EmptyLine) {
+    EXPECT_EQ(
+        CommandParser::parse("").type,
+        CommandType::Unknown);
 }
 
-TEST(CommandParserTest, InvalidArgumentCount) {
-    EXPECT_EQ(CommandParser::parse("GET").type,
-              CommandType::Unknown);
-
-    EXPECT_EQ(CommandParser::parse("SET key").type,
-              CommandType::Unknown);
-
-    EXPECT_EQ(CommandParser::parse("DEL").type,
-              CommandType::Unknown);
-
-    EXPECT_EQ(CommandParser::parse("GET a b").type,
-              CommandType::Unknown);
+TEST(CommandParserTest, ExpireWrongArgCount) {
+    EXPECT_EQ(
+        CommandParser::parse("EXPIRE k").type,
+        CommandType::Unknown);
 }

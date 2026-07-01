@@ -4,12 +4,15 @@
 #include "protocol/Command.h"
 #include "protocol/CommandParser.h"
 #include "store/KvStore.h"
+
 #include <memory>
 
 #include <sys/socket.h>
 
 #include <array>
 #include <cerrno>
+#include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -63,13 +66,29 @@ std::string execute(
                 ? "DELETED\r\n"
                 : "NOT_FOUND\r\n";
 
+        case CommandType::Expire: {
+            int seconds = 0;
+
+            auto [ptr, ec] = std::from_chars(
+                cmd.args[1].data(),
+                cmd.args[1].data() + cmd.args[1].size(),
+                seconds);
+
+            if (ec != std::errc{} || seconds < 0) {
+                return "ERROR invalid TTL\r\n";
+            }
+
+            return store.expire(cmd.args[0], std::chrono::seconds(seconds))
+                ? "OK\r\n"
+                : "NOT_FOUND\r\n";
+        }
+
         case CommandType::Unknown:
         default:
             return "ERROR unknown command\r\n";
     }
 }
 
-// Client socket is moved into the lambda so it's owned by the worker thread.
 void serveClient(
     miniredis::net::Socket client,
     miniredis::store::KvStore& store) {
@@ -103,7 +122,7 @@ void serveClient(
     }
 }
 
-} // namespace
+}  // namespace
 
 int main() {
     try {
@@ -118,12 +137,12 @@ int main() {
                   << " worker threads)\n";
 
         while (true) {
-            auto client = std::make_shared<miniredis::net::Socket>(listener.accept());
+            auto client =
+                std::make_shared<miniredis::net::Socket>(listener.accept());
 
-pool.enqueue(
-    [&store, client]() {
-        serveClient(std::move(*client), store);
-    });
+            pool.enqueue([&store, client]() {
+                serveClient(std::move(*client), store);
+            });
         }
 
     } catch (const std::exception& e) {
