@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.20)
+project(cache_server LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# Scoped to our own targets (not global) so future third-party targets
+# aren't held to our warning level.
+set(CACHE_WARNING_FLAGS -Wall -Wextra -Wpedantic -Werror)
+
+add_library(cache_net
+    src/net/Socket.cpp
+    src/net/TcpListener.cpp
+)
+target_include_directories(cache_net PUBLIC include)
+target_compile_options(cache_net PRIVATE ${CACHE_WARNING_FLAGS})
+
+add_executable(cache_server src/main.cpp)
+target_link_libraries(cache_server PRIVATE cache_net)
+target_compile_options(cache_server PRIVATE ${CACHE_WARNING_FLAGS})
