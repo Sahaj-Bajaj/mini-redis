@@ -1,5 +1,8 @@
 #include "net/Socket.h"
 #include "net/TcpListener.h"
+#include "protocol/Command.h"
+#include "protocol/CommandParser.h"
+#include "store/KvStore.h"
 
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -10,40 +13,108 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 namespace {
 
 constexpr uint16_t kPort = 6380;  // 6380, not 6379, to avoid colliding with a real Redis instance.
 constexpr std::size_t kBufferSize = 4096;
 
-// Reads from the client and writes back exactly what was read, until the
-// client closes the connection or an error occurs.
-void runEchoLoop(miniredis::net::Socket& client) {
-    std::array<char, kBufferSize> buffer{};
+// Sends every byte in the response.
+void sendAll(miniredis::net::Socket& client, const std::string& response) {
+    std::size_t totalSent = 0;
 
-    while (true) {
-        ssize_t bytesRead = ::recv(client.fd(), buffer.data(), buffer.size(), 0);
-        if (bytesRead < 0) {
-            std::cerr << "recv() failed: " << std::strerror(errno) << '\n';
+    while (totalSent < response.size()) {
+        const ssize_t bytesSent = ::send(
+            client.fd(),
+            response.data() + totalSent,
+            response.size() - totalSent,
+            MSG_NOSIGNAL);
+
+        if (bytesSent < 0) {
+            std::cerr << "send() failed: "
+                      << std::strerror(errno)
+                      << '\n';
             return;
         }
-        if (bytesRead == 0) {
-            return;  // Client closed its side of the connection.
+
+        totalSent += static_cast<std::size_t>(bytesSent);
+    }
+}
+
+// Reads commands from the client, executes them against the key-value store,
+// and sends back a text response.
+void runCommandLoop(miniredis::net::Socket& client,
+                    miniredis::store::KvStore& store) {
+    std::array<char, kBufferSize> chunk{};
+    std::string buffer;
+
+    while (true) {
+        const ssize_t bytesRead =
+            ::recv(client.fd(), chunk.data(), chunk.size(), 0);
+
+        if (bytesRead < 0) {
+            std::cerr << "recv() failed: "
+                      << std::strerror(errno)
+                      << '\n';
+            return;
         }
 
-        // send() is not guaranteed to write every byte in one call, so we
-        // loop until the whole chunk that was just read is flushed out.
-        std::size_t totalSent = 0;
-        while (totalSent < static_cast<std::size_t>(bytesRead)) {
-            ssize_t bytesSent = ::send(client.fd(),
-                                       buffer.data() + totalSent,
-                                       static_cast<std::size_t>(bytesRead) - totalSent,
-                                       MSG_NOSIGNAL);
-            if (bytesSent < 0) {
-                std::cerr << "send() failed: " << std::strerror(errno) << '\n';
-                return;
+        if (bytesRead == 0) {
+            return;
+        }
+
+        buffer.append(chunk.data(),
+                      static_cast<std::size_t>(bytesRead));
+
+        std::size_t newlinePos;
+
+        while ((newlinePos = buffer.find('\n')) != std::string::npos) {
+
+            std::string line = buffer.substr(0, newlinePos);
+
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
             }
-            totalSent += static_cast<std::size_t>(bytesSent);
+
+            buffer.erase(0, newlinePos + 1);
+
+            const auto command =
+                miniredis::protocol::CommandParser::parse(line);
+
+            std::string response;
+
+            using miniredis::protocol::CommandType;
+
+            switch (command.type) {
+                case CommandType::Set:
+                    store.set(command.args[0], command.args[1]);
+                    response = "OK\n";
+                    break;
+
+                case CommandType::Get: {
+                    const auto value = store.get(command.args[0]);
+
+                    if (value) {
+                        response = *value + "\n";
+                    } else {
+                        response = "NULL\n";
+                    }
+
+                    break;
+                }
+
+                case CommandType::Del:
+                    response = store.del(command.args[0]) ? "1\n" : "0\n";
+                    break;
+
+                case CommandType::Unknown:
+                default:
+                    response = "ERR unknown command\n";
+                    break;
+            }
+
+            sendAll(client, response);
         }
     }
 }
@@ -53,14 +124,18 @@ void runEchoLoop(miniredis::net::Socket& client) {
 int main() {
     try {
         miniredis::net::TcpListener listener(kPort);
+        miniredis::store::KvStore store;
+
         std::cout << "MiniRedis listening on port " << kPort << '\n';
 
         while (true) {
             std::cout << "Waiting for a client...\n";
+
             miniredis::net::Socket client = listener.accept();
+
             std::cout << "Client connected.\n";
 
-            runEchoLoop(client);
+            runCommandLoop(client, store);
 
             std::cout << "Client disconnected.\n";
         }

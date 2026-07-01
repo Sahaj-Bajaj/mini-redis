@@ -4,28 +4,81 @@ A Redis-inspired in-memory key-value cache server, built incrementally in modern
 
 ## Status
 
-**Phase 1 complete:** TCP listener + single-client echo server.
+**Phase 2 Complete**
+
+Implemented:
+
+- TCP listener
+- Persistent client connections
+- Text-based command protocol
+- Single-threaded in-memory key-value store
+- `SET`
+- `GET`
+- `DEL`
+- GoogleTest unit tests
 
 ## Build
 
-    cmake -S . -B build
-    cmake --build build
+```bash
+cmake -S . -B build
+cmake --build build
+```
 
 ## Run
 
-    ./build/miniredis
+```bash
+./build/miniredis
+```
 
-Listens on port 6380. Connect with `nc localhost 6380` — anything typed is echoed back.
+The server listens on port **6380**.
+
+You can connect using:
+
+```bash
+nc localhost 6380
+```
+
+## Tests
+
+```bash
+cd build
+ctest --output-on-failure
+```
+
+## Protocol
+
+| Command | Response |
+|---------|----------|
+| `SET key value` | `OK` |
+| `GET key` | `<value>` or `NULL` |
+| `DEL key` | `1` (deleted) or `0` (not found) |
+| Unknown command | `ERR unknown command` |
+
+### Example Session
+
+```text
+SET name Sahaj
+OK
+
+GET name
+Sahaj
+
+DEL name
+1
+
+GET name
+NULL
+```
 
 ## Roadmap
 
-- [x] Phase 1 -- TCP listener, single-client echo
-- [ ] Phase 2 -- text protocol, SET/GET/DEL, single-threaded KV store
-- [ ] Phase 3 -- LRU eviction, bounded cache
-- [ ] Phase 4 -- thread pool, concurrent clients
-- [ ] Phase 5 -- sharded store, lock striping
-- [ ] Phase 6 -- TTL, active/passive expiration
-- [ ] Phase 7 -- INFO/admin commands
-- [ ] Phase 8 -- benchmarking
-- [ ] Phase 9 -- append-only persistence (optional)
-- [ ] Phase 10 -- RESP protocol, pipelining (optional)
+- [x] Phase 1 -- TCP listener and single-client echo server
+- [x] Phase 2 -- Text protocol, `SET`/`GET`/`DEL`, single-threaded key-value store
+- [ ] Phase 3 -- O(1) LRU eviction and bounded cache
+- [ ] Phase 4 -- Thread pool and concurrent client handling
+- [ ] Phase 5 -- Sharded key-value store and lock striping
+- [ ] Phase 6 -- TTL expiration and background cleanup
+- [ ] Phase 7 -- INFO and administrative commands
+- [ ] Phase 8 -- Benchmarking and performance analysis
+- [ ] Phase 9 -- Append-only persistence (optional)
+- [ ] Phase 10 -- RESP protocol and request pipelining (optional)
