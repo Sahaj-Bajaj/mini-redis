@@ -135,6 +135,15 @@ std::size_t KvStore::maxSize() const noexcept {
     return maxSize_;
 }
 
+std::size_t KvStore::shardSize(std::size_t shardIdx) const noexcept {
+    if (shardIdx >= kShardCount) {
+        return 0;
+    }
+
+    std::scoped_lock lock(shards_[shardIdx].mutex);
+    return shards_[shardIdx].data.size();
+}
+
 void KvStore::sweepLoop() {
     while (true) {
         {
@@ -154,12 +163,13 @@ void KvStore::sweepLoop() {
 
             for (auto it = shard.data.begin(); it != shard.data.end();) {
                 if (it->second.expiry &&
-                    Clock::now() >= *it->second.expiry) {
-                    shard.lruOrder.erase(it->second.lruIt);
-                    it = shard.data.erase(it);
-                } else {
-                    ++it;
-                }
+    Clock::now() >= *it->second.expiry) {
+    shard.lruOrder.erase(it->second.lruIt);
+    it = shard.data.erase(it);
+    expiredKeyCount.fetch_add(1, std::memory_order_relaxed);
+} else {
+    ++it;
+}
             }
         }
     }

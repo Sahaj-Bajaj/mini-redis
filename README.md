@@ -2,7 +2,7 @@
 
 A Redis-inspired in-memory key-value cache server built incrementally in modern **C++20** to learn systems programming, networking, concurrency, and backend engineering concepts.
 
-**Current Status: Phase 5 Complete**
+**Current Status: Phase 6 Complete**
 
 ## Features
 
@@ -18,11 +18,15 @@ Implemented so far:
 * O(1) per-shard LRU cache using `std::list` + `std::unordered_map`
 * Configurable cache capacity
 * Automatic Least Recently Used (LRU) eviction
+* TTL (Time-To-Live) support
+* Passive expiration on key access
+* Background active expiration thread
 * Commands:
 
   * `SET`
   * `GET`
   * `DEL`
+  * `EXPIRE`
 * GoogleTest unit tests
 
 ## Build
@@ -57,67 +61,78 @@ ctest --output-on-failure
 
 ## Supported Commands
 
-| Command         | Response                       |
-| --------------- | ------------------------------ |
-| `SET key value` | `OK`                           |
-| `GET key`       | `VALUE <value>` or `NOT_FOUND` |
-| `DEL key`       | `DELETED` or `NOT_FOUND`       |
-| Unknown command | `ERROR unknown command`        |
+| Command | Response |
+|----------|----------|
+| `SET key value` | `OK` |
+| `GET key` | `VALUE <value>` or `NOT_FOUND` |
+| `DEL key` | `DELETED` or `NOT_FOUND` |
+| `EXPIRE key seconds` | `OK` or `NOT_FOUND` |
+| Unknown command | `ERROR unknown command` |
 
 ## Example Session
 
 ```text
-SET name Sahaj
+SET session abc
 OK
 
-GET name
-VALUE Sahaj
+GET session
+VALUE abc
 
-DEL name
-DELETED
+EXPIRE session 5
+OK
 
-GET name
+GET session
+VALUE abc
+
+# wait 5+ seconds
+
+GET session
 NOT_FOUND
 ```
 
 ## Current Architecture
 
 ```text
-                +----------------+
-                |  TcpListener   |
-                +-------+--------+
-                        |
-                   accept()
-                        |
-                        v
-                +----------------+
-                |  ThreadPool    |
-                | (4 workers)    |
-                +-------+--------+
-                        |
-                 worker thread
-                        |
-                        v
-                +----------------+
-                | serveClient()  |
-                +-------+--------+
-                        |
-                 CommandParser
-                        |
-                        v
-                +----------------+
-                | Sharded KvStore|
-                | (16 Shards)    |
-                +-------+--------+
-                        |
-          +-------------+-------------+
-          |             |             |
-          v             v             v
-      +-------+     +-------+     +-------+
-      |Shard 0| ... |Shard 7| ... |Shard15|
-      |Map+LRU|     |Map+LRU|     |Map+LRU|
-      |Mutex  |     |Mutex  |     |Mutex  |
-      +-------+     +-------+     +-------+
+                     +----------------+
+                     |  TcpListener   |
+                     +-------+--------+
+                             |
+                        accept()
+                             |
+                             v
+                     +----------------+
+                     |  ThreadPool    |
+                     | (4 workers)    |
+                     +-------+--------+
+                             |
+                      worker thread
+                             |
+                             v
+                     +----------------+
+                     | serveClient()  |
+                     +-------+--------+
+                             |
+                      CommandParser
+                             |
+                             v
+                +-----------------------------+
+                |        Sharded KvStore      |
+                |     (16 independent shards) |
+                +---------------+-------------+
+                                |
+          +---------------------+---------------------+
+          |                     |                     |
+          v                     v                     v
+     +----------+          +----------+         +----------+
+     | Shard 0  |   ...    | Shard 7  |   ...   | Shard15  |
+     | Map      |          | Map      |         | Map      |
+     | LRU      |          | LRU      |         | LRU      |
+     | TTL      |          | TTL      |         | TTL      |
+     | Mutex    |          | Mutex    |         | Mutex    |
+     +----------+          +----------+         +----------+
+                                ^
+                                |
+                    Background TTL Sweep Thread
 ```
 
 ## Roadmap
@@ -127,7 +142,7 @@ NOT_FOUND
 * [x] Phase 3 — O(1) LRU cache and bounded capacity
 * [x] Phase 4 — Thread pool and concurrent client handling
 * [x] Phase 5 — Sharded key-value store and lock striping
-* [ ] Phase 6 — TTL expiration and background cleanup
+* [x] Phase 6 — TTL expiration and background cleanup
 * [ ] Phase 7 — INFO and administrative commands
 * [ ] Phase 8 — Benchmarking and performance analysis
 * [ ] Phase 9 — Append-only persistence (optional)

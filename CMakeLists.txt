@@ -43,6 +43,14 @@ target_include_directories(miniredis_store PUBLIC include)
 target_link_libraries(miniredis_store PUBLIC Threads::Threads)
 target_compile_options(miniredis_store PRIVATE ${CACHE_WARNING_FLAGS})
 
+# Phase 7
+add_library(miniredis_stats
+    src/stats/Stats.cpp
+)
+
+target_include_directories(miniredis_stats PUBLIC include)
+target_compile_options(miniredis_stats PRIVATE ${CACHE_WARNING_FLAGS})
+
 add_executable(miniredis
     src/main.cpp
 )
@@ -51,6 +59,7 @@ target_link_libraries(miniredis PRIVATE
     miniredis_net
     miniredis_protocol
     miniredis_store
+    miniredis_stats
 )
 
 target_compile_options(miniredis PRIVATE ${CACHE_WARNING_FLAGS})
@@ -75,6 +84,7 @@ add_executable(miniredis_tests
 target_link_libraries(miniredis_tests PRIVATE
     miniredis_protocol
     miniredis_store
+    miniredis_stats
     GTest::gtest_main
 )
 

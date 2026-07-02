@@ -3,6 +3,7 @@
 #include "net/ThreadPool.h"
 #include "protocol/Command.h"
 #include "protocol/CommandParser.h"
+#include "stats/Stats.h"
 #include "store/KvStore.h"
 
 #include <memory>
@@ -47,18 +48,31 @@ void sendAll(miniredis::net::Socket& socket, const std::string& data) {
 
 std::string execute(
     const miniredis::protocol::Command& cmd,
-    miniredis::store::KvStore& store) {
+    miniredis::store::KvStore& store,
+    miniredis::stats::Stats& stats) {
 
     using miniredis::protocol::CommandType;
 
+    stats.totalCommands.fetch_add(1, std::memory_order_relaxed);
+
     switch (cmd.type) {
+        case CommandType::Ping:
+            return "PONG\r\n";
+
         case CommandType::Set:
             store.set(cmd.args[0], cmd.args[1]);
             return "OK\r\n";
 
         case CommandType::Get: {
             auto value = store.get(cmd.args[0]);
-            return value ? ("VALUE " + *value + "\r\n") : "NOT_FOUND\r\n";
+
+            if (value) {
+                stats.hits.fetch_add(1, std::memory_order_relaxed);
+                return "VALUE " + *value + "\r\n";
+            }
+
+            stats.misses.fetch_add(1, std::memory_order_relaxed);
+            return "NOT_FOUND\r\n";
         }
 
         case CommandType::Del:
@@ -83,6 +97,29 @@ std::string execute(
                 : "NOT_FOUND\r\n";
         }
 
+        case CommandType::Size:
+            return "SIZE " + std::to_string(store.size()) + "\r\n";
+
+        case CommandType::Shards: {
+            std::string out;
+
+            for (std::size_t i = 0; i < miniredis::store::KvStore::kShardCount; ++i) {
+                out += "shard[" + std::to_string(i) + "]:"
+                    + std::to_string(store.shardSize(i)) + "\r\n";
+            }
+
+            return out;
+        }
+
+        case CommandType::Info:
+            stats.expiredKeys.store(
+                store.expiredKeyCount.load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
+
+            return stats.report(
+                store.size(),
+                miniredis::store::KvStore::kShardCount);
+
         case CommandType::Unknown:
         default:
             return "ERROR unknown command\r\n";
@@ -91,7 +128,8 @@ std::string execute(
 
 void serveClient(
     miniredis::net::Socket client,
-    miniredis::store::KvStore& store) {
+    miniredis::store::KvStore& store,
+    miniredis::stats::Stats& stats) {
 
     std::string buffer;
     std::array<char, kBufferSize> chunk{};
@@ -117,7 +155,7 @@ void serveClient(
             buffer.erase(0, pos + 1);
 
             auto cmd = miniredis::protocol::CommandParser::parse(line);
-            sendAll(client, execute(cmd, store));
+            sendAll(client, execute(cmd, store, stats));
         }
     }
 }
@@ -129,6 +167,7 @@ int main() {
         miniredis::net::TcpListener listener(kPort);
         miniredis::net::ThreadPool pool(kThreadCount);
         miniredis::store::KvStore store(kMaxKeys);
+        miniredis::stats::Stats stats;
 
         std::cout << "miniredis listening on port "
                   << kPort
@@ -140,8 +179,8 @@ int main() {
             auto client =
                 std::make_shared<miniredis::net::Socket>(listener.accept());
 
-            pool.enqueue([&store, client]() {
-                serveClient(std::move(*client), store);
+            pool.enqueue([&store, &stats, client]() {
+                serveClient(std::move(*client), store, stats);
             });
         }
 

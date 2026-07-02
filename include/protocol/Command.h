@@ -10,6 +10,10 @@ enum class CommandType {
     Get,
     Del,
     Expire,
+    Ping,
+    Size,
+    Shards,
+    Info,
     Unknown
 };
 

@@ -32,6 +32,10 @@ public:
 
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::size_t maxSize() const noexcept;
+    [[nodiscard]] std::size_t shardSize(std::size_t shardIdx) const noexcept;
+
+    // Incremented by the sweep thread; readable by Stats.
+    std::atomic<uint64_t> expiredKeyCount{0};
 
 private:
     using Clock = std::chrono::steady_clock;

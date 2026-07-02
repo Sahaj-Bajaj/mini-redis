@@ -51,6 +51,22 @@ Command CommandParser::parse(std::string_view line) {
         return {CommandType::Expire, {tokens[1], tokens[2]}};
     }
 
+    if (verb == "PING" && tokens.size() == 1) {
+        return {CommandType::Ping, {}};
+    }
+
+    if (verb == "SIZE" && tokens.size() == 1) {
+        return {CommandType::Size, {}};
+    }
+
+    if (verb == "SHARDS" && tokens.size() == 1) {
+        return {CommandType::Shards, {}};
+    }
+
+    if (verb == "INFO" && tokens.size() == 1) {
+        return {CommandType::Info, {}};
+    }
+
     return {};
 }
 
