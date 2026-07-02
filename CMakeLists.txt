@@ -64,6 +64,15 @@ target_link_libraries(miniredis PRIVATE
 
 target_compile_options(miniredis PRIVATE ${CACHE_WARNING_FLAGS})
 
+# ── Benchmark ──────────────────────────────────────────────────────────────────
+add_executable(miniredis_bench
+    bench/bench.cpp
+)
+
+target_include_directories(miniredis_bench PRIVATE include)
+target_link_libraries(miniredis_bench PRIVATE Threads::Threads)
+target_compile_options(miniredis_bench PRIVATE ${CACHE_WARNING_FLAGS})
+
 include(FetchContent)
 
 FetchContent_Declare(
