@@ -1,61 +1,56 @@
-# mini-redis
+# MiniRedis
 
-A Redis-inspired in-memory cache server written in modern C++20 from scratch.
+A Redis-inspired in-memory key-value cache server built incrementally in modern **C++20** to learn systems programming, networking, concurrency, persistence, and backend engineering concepts.
 
-No Boost, no Asio, no external networking libraries — raw POSIX sockets, a hand-rolled thread pool, sharded lock striping, LRU eviction, TTL expiration, RESP2 protocol compatibility, and append-only persistence.
-
----
+**Current Status: Phase 10 Complete**
 
 ## Features
 
-| Feature | Detail |
-|---|---|
-| Protocol | RESP2 (redis-cli compatible) + plain-text (nc compatible), auto-detected per connection |
-| Commands | SET, GET, DEL, EXPIRE, PING, SIZE, SHARDS, INFO |
-| Concurrency | Fixed thread pool (4 workers), one persistent connection per client |
-| Storage | 16-shard hash table with per-shard mutex (lock striping) |
-| Eviction | Per-shard LRU via `std::list` + iterator map — O(1) get/set/evict |
-| TTL | Passive expiry on access + active background sweep thread (1s interval) |
-| Persistence | Append-only file (AOF) — replayed on startup to restore state |
-| Stats | Lock-free atomic counters: hits, misses, total commands, expired keys |
-| Testing | GoogleTest unit tests for store, parser, AOF, and RESP layers |
+Implemented so far:
 
----
+* TCP listener using POSIX sockets
+* Persistent client connections
+* Fixed-size thread pool
+* Concurrent client handling
+* **Sharded** thread-safe in-memory key-value store
+* Lock striping with per-shard mutexes
+* Dual protocol support:
+  * Text protocol
+  * RESP2 protocol (compatible with `redis-cli`)
+* Automatic protocol detection per connection
+* Request pipelining for RESP clients
+* O(1) per-shard LRU cache using `std::list` + `std::unordered_map`
+* Configurable cache capacity
+* Automatic Least Recently Used (LRU) eviction
+* TTL (Time-To-Live) support
+* Passive expiration on key access
+* Background active expiration thread
+* Append-Only File (AOF) persistence
+* Automatic replay of persisted commands on startup
+* Lock-free server statistics
+* Benchmark client for throughput and latency measurement
+* Stress-testing and latency measurement scripts
+* GoogleTest unit tests
 
-## Architecture
+### Supported Commands
 
-```
-┌─────────────────────────────────────────────┐
-│                   main.cpp                  │
-│  TcpListener → ThreadPool → serveClient()   │
-└────────────┬──────────────┬─────────────────┘
-             │              │
-     ┌───────▼──────┐  ┌────▼────────────────┐
-     │ RespParser / │  │      KvStore         │
-     │CommandParser │  │  16 shards           │
-     └───────┬──────┘  │  per-shard mutex     │
-             │         │  LRU list+map        │
-     ┌───────▼──────┐  │  TTL + sweep thread  │
-     │RespFormatter │  └──────────┬───────────┘
-     └──────────────┘             │
-                          ┌───────▼───────┐
-                          │   AofWriter   │
-                          │ (append-only) │
-                          └───────────────┘
-```
+* `PING`
+* `SET`
+* `GET`
+* `DEL`
+* `EXPIRE`
+* `INFO`
+* `SIZE`
+* `SHARDS`
 
 ---
 
 ## Build
 
-Requires: GCC/Clang with C++20, CMake 3.20+, Linux or WSL2.
-
 ```bash
 cmake -S . -B build
 cmake --build build
 ```
-
-First configure downloads GoogleTest automatically (requires internet).
 
 ---
 
@@ -63,131 +58,270 @@ First configure downloads GoogleTest automatically (requires internet).
 
 ```bash
 ./build/miniredis
-# miniredis listening on port 6380 (4 worker threads)
 ```
 
----
+The server listens on port **6380**.
 
-## Connect
+You can connect using either protocol.
 
-**Plain text via nc:**
+### Text protocol
+
 ```bash
 nc localhost 6380
-SET name alice
-GET name          # VALUE alice
-EXPIRE name 10    # OK
-PING              # PONG
-INFO
 ```
 
-**RESP2 via redis-cli:**
+### RESP2
+
 ```bash
-redis-cli -p 6380 set foo bar
-redis-cli -p 6380 get foo
-redis-cli -p 6380 info
+redis-cli -p 6380
 ```
+
+Multiple clients can connect simultaneously. Requests are processed by a fixed-size worker thread pool while keys are distributed across multiple shards using lock striping to reduce contention.
 
 ---
 
-## Commands
-
-| Command | Response (text) | Response (RESP2) |
-|---|---|---|
-| `SET key value` | `OK` | `+OK` |
-| `GET key` | `VALUE <v>` / `NOT_FOUND` | `$<n>\r\n<v>` / `$-1` |
-| `DEL key` | `DELETED` / `NOT_FOUND` | `:1` / `:0` |
-| `EXPIRE key secs` | `OK` / `NOT_FOUND` | `:1` / `:0` |
-| `PING` | `PONG` | `+PONG` |
-| `SIZE` | `SIZE <n>` | `:<n>` |
-| `SHARDS` | `shard[0]:<n> ...` | bulk string |
-| `INFO` | stats block | bulk string |
-
----
-
-## Tests
+## Running Tests
 
 ```bash
-cd build && ctest --output-on-failure
+cd build
+ctest --output-on-failure
 ```
-
-Covers: KvStore (set/get/del/LRU/eviction), CommandParser (all verbs, edge cases), AOF (replay, del, append-mode), RespParser (pipelining, incomplete frames), RespFormatter (all response types).
 
 ---
 
 ## Benchmark
 
-```bash
-# Terminal 1
-./build/miniredis
+Run the server:
 
-# Terminal 2
+```bash
+./build/miniredis
+```
+
+In another terminal:
+
+```bash
 ./build/miniredis_bench 127.0.0.1 6380 100000 4
 ```
 
-Sample output (WSL2 — native Linux is typically 2–3× higher):
+Example output:
 
-```
-completed ops : 100000
-wall time     : 2.98 s
-throughput    : 33,557 ops/s
-latency p50   : 47 µs
-latency p99   : 312 µs
-latency p99.9 : 891 µs
+```text
+completed ops : 200000
+throughput    : 33955 ops/s
+latency p50   : 112 µs
+latency p99   : 268 µs
+latency p99.9 : 790 µs
 ```
 
-Stress test (8 concurrent clients, correctness verified):
+Helper scripts:
+
 ```bash
-chmod +x scripts/stress.sh && ./scripts/stress.sh 8 500
+chmod +x scripts/stress.sh scripts/latency.sh
+
+./scripts/stress.sh
+./scripts/latency.sh
+```
+
+> Note: The benchmark client (`miniredis_bench`) provides the primary throughput and latency measurements. The helper scripts are intended for lightweight testing and may show platform-dependent behavior under WSL because of shell and `nc` overhead.
+
+---
+
+## Persistence (AOF)
+
+MiniRedis implements a simple Append-Only File (AOF) persistence mechanism.
+
+Every successful:
+
+* `SET`
+* `DEL`
+
+operation is appended to `miniredis.aof`.
+
+When the server starts, the AOF is replayed automatically to restore the previous in-memory state.
+
+Current limitations:
+
+* TTLs are **not persisted**.
+* `EXPIRE` commands are intentionally ignored during replay.
+* No AOF compaction (`BGREWRITEAOF`) yet.
+* No configurable fsync policy.
+
+---
+
+## RESP2 Support
+
+MiniRedis supports the Redis Serialization Protocol (RESP2).
+
+Features:
+
+* Compatible with `redis-cli`
+* Automatic protocol detection
+* Request pipelining
+* Bulk strings
+* Integer replies
+* Error replies
+* Null bulk replies
+* Simple string replies
+
+The original text protocol remains fully supported for manual testing using `nc`.
+
+---
+
+## Supported Commands
+
+| Command | Text Response | RESP2 Response |
+|----------|---------------|----------------|
+| `PING` | `PONG` | `+PONG` |
+| `SET key value` | `OK` | `+OK` |
+| `GET key` | `VALUE <value>` | Bulk String |
+| `DEL key` | `DELETED` / `NOT_FOUND` | Integer |
+| `EXPIRE key seconds` | `OK` / `NOT_FOUND` | Integer |
+| `SIZE` | Number of keys | Integer |
+| `INFO` | Statistics | Bulk String |
+| `SHARDS` | Per-shard statistics | Bulk String |
+| Unknown command | Error | `-ERR` |
+
+---
+
+## Example Session (Text Protocol)
+
+```text
+PING
+PONG
+
+SET session abc
+OK
+
+GET session
+VALUE abc
+
+EXPIRE session 5
+OK
+
+INFO
+
+SIZE
+
+SHARDS
 ```
 
 ---
 
-## Project Structure
+## Example Session (RESP2)
 
+```bash
+redis-cli -p 6380
+
+127.0.0.1:6380> PING
+PONG
+
+127.0.0.1:6380> SET foo bar
+OK
+
+127.0.0.1:6380> GET foo
+"bar"
+
+127.0.0.1:6380> INFO
+...
 ```
-mini-redis/
+
+---
+
+## Current Architecture
+
+```text
+                     +----------------+
+                     |  TcpListener   |
+                     +-------+--------+
+                             |
+                        accept()
+                             |
+                             v
+                     +----------------+
+                     |  ThreadPool    |
+                     | (4 workers)    |
+                     +-------+--------+
+                             |
+                      worker thread
+                             |
+                             v
+                     +----------------+
+                     | serveClient()  |
+                     +-------+--------+
+                             |
+               +-------------+-------------+
+               |                           |
+        Text Protocol                 RESP2 Parser
+        CommandParser                 (Pipelining)
+               |                           |
+               +-------------+-------------+
+                             |
+                             v
+                +-----------------------------+
+                |        Sharded KvStore      |
+                |     (16 independent shards) |
+                +---------------+-------------+
+                                |
+          +---------------------+----------------------+
+          |                     |                      |
+          v                     v                      v
+     +----------+         +----------+          +----------+
+     | Shard 0  |   ...   | Shard 7  |   ...    | Shard15  |
+     | Map      |         | Map      |          | Map      |
+     | LRU      |         | LRU      |          | LRU      |
+     | TTL      |         | TTL      |          | TTL      |
+     | Mutex    |         | Mutex    |          | Mutex    |
+     +----------+         +----------+          +----------+
+                                ^
+                                |
+                    Background TTL Sweep Thread
+                                |
+                                v
+                     Lock-free Statistics Module
+                                |
+                                v
+                     Append-Only File (AOF)
+```
+
+---
+
+## Repository Structure
+
+```text
+.
+├── bench/
+│   └── bench.cpp
 ├── include/
-│   ├── net/           # Socket, TcpListener, ThreadPool
-│   ├── protocol/      # Command, CommandParser, RespParser, RespFormatter
-│   ├── store/         # KvStore (sharded LRU + TTL)
-│   ├── stats/         # Lock-free atomic Stats
-│   └── persistence/   # AofWriter, AofReader
-├── src/               # Implementations (mirrors include/)
-├── tests/             # GoogleTest suites
-├── bench/             # Benchmark client
-└── scripts/           # stress.sh, latency.sh
+│   ├── net/
+│   ├── persistence/
+│   ├── protocol/
+│   ├── stats/
+│   └── store/
+├── scripts/
+│   ├── latency.sh
+│   └── stress.sh
+├── src/
+│   ├── net/
+│   ├── persistence/
+│   ├── protocol/
+│   ├── stats/
+│   └── store/
+├── tests/
+├── CMakeLists.txt
+└── README.md
 ```
 
 ---
 
-## Design Decisions
+## Roadmap
 
-**Why 16 shards?**
-Power-of-2 count enables bitmask dispatch (`hash & 15`) instead of modulo. 16 shards eliminates mutex contention across typical 4–8 core machines. Each shard owns its mutex, LRU list, and hash map independently.
-
-**Why list + iterator map for LRU?**
-`std::list::splice` moves a node to the front in O(1) without invalidating any iterators. Storing the iterator inside the map entry means GET promotion is O(1) with no list traversal.
-
-**Why passive + active TTL expiry?**
-Passive expiry (check on GET) is free but leaves dead keys in memory until accessed. Active expiry (background sweep every 1s) bounds memory growth. Redis uses both for the same reason.
-
-**Why AOF instead of snapshots?**
-AOF trades larger file size for simpler, safer writes — each mutation is one appended line. Snapshot consistency requires either a fork or a read lock across the entire store.
-
-**Why RESP2 auto-detection?**
-First byte `*` identifies RESP2; anything else is plain text. Detection is per-connection and one-time. Keeps `nc` and `redis-cli` both working without a config flag.
-
----
-
-## Known Limitations
-
-- TTL does not survive restarts (`steady_clock` has no epoch; fix: persist `EXPIREAT <unix_ms>`)
-- AOF grows unboundedly (no compaction / `BGREWRITEAOF`)
-- No authentication, TLS, or ACL
-- No RESP3 support
-
----
-
-## License
-
-MIT
+- [x] Phase 1 — TCP listener and persistent client connections
+- [x] Phase 2 — Text protocol and key-value store (`SET`, `GET`, `DEL`)
+- [x] Phase 3 — O(1) LRU cache and bounded capacity
+- [x] Phase 4 — Thread pool and concurrent client handling
+- [x] Phase 5 — Sharded key-value store and lock striping
+- [x] Phase 6 — TTL expiration and background cleanup
+- [x] Phase 7 — INFO and administrative commands
+- [x] Phase 8 — Benchmarking and performance analysis
+- [x] Phase 9 — Append-only persistence
+- [x] Phase 10 — RESP2 protocol and request pipelining
