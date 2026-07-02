@@ -24,6 +24,8 @@ target_compile_options(miniredis_net PRIVATE ${CACHE_WARNING_FLAGS})
 
 add_library(miniredis_protocol
     src/protocol/CommandParser.cpp
+    src/protocol/RespParser.cpp
+    src/protocol/RespFormatter.cpp
 )
 target_include_directories(miniredis_protocol PUBLIC include)
 target_compile_options(miniredis_protocol PRIVATE ${CACHE_WARNING_FLAGS})
@@ -41,23 +43,28 @@ add_library(miniredis_stats
 target_include_directories(miniredis_stats PUBLIC include)
 target_compile_options(miniredis_stats PRIVATE ${CACHE_WARNING_FLAGS})
 
+add_library(miniredis_persistence
+    src/persistence/AofWriter.cpp
+    src/persistence/AofReader.cpp
+)
+target_include_directories(miniredis_persistence PUBLIC include)
+target_link_libraries(miniredis_persistence PRIVATE miniredis_protocol miniredis_store)
+target_compile_options(miniredis_persistence PRIVATE ${CACHE_WARNING_FLAGS})
+
 add_executable(miniredis src/main.cpp)
 target_link_libraries(miniredis PRIVATE
-    miniredis_net miniredis_protocol miniredis_store miniredis_stats)
+    miniredis_net miniredis_protocol miniredis_store
+    miniredis_stats miniredis_persistence)
 target_compile_options(miniredis PRIVATE ${CACHE_WARNING_FLAGS})
 
-# ── Benchmark ──────────────────────────────────────────────────────────────────
 add_executable(miniredis_bench bench/bench.cpp)
 target_include_directories(miniredis_bench PRIVATE include)
 target_link_libraries(miniredis_bench PRIVATE Threads::Threads)
 target_compile_options(miniredis_bench PRIVATE ${CACHE_WARNING_FLAGS})
 
-# ── Tests ──────────────────────────────────────────────────────────────────────
 include(FetchContent)
-FetchContent_Declare(
-    googletest
-    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
-)
+FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
@@ -66,9 +73,12 @@ enable_testing()
 add_executable(miniredis_tests
     tests/test_kv_store.cpp
     tests/test_command_parser.cpp
+    tests/test_aof.cpp
+    tests/test_resp.cpp
 )
 target_link_libraries(miniredis_tests PRIVATE
-    miniredis_protocol miniredis_store miniredis_stats GTest::gtest_main)
+    miniredis_protocol miniredis_store miniredis_stats
+    miniredis_persistence GTest::gtest_main)
 target_compile_options(miniredis_tests PRIVATE ${CACHE_WARNING_FLAGS})
 
 include(GoogleTest)

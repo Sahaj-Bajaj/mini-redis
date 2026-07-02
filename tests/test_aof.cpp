@@ -22,7 +22,7 @@ TEST_F(AofTest, ReplayRestoresSets) {
 TEST_F(AofTest, ReplayAppliesDel) {
     { persistence::AofWriter w(kPath); w.writeSet("a","1"); w.writeDel("a"); }
     store::KvStore store;
-    persistence::AofReader::replay(kPath, store);
+    (void)persistence::AofReader::replay(kPath, store);
     EXPECT_EQ(store.get("a"), std::nullopt);
 }
 

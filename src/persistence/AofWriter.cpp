@@ -16,6 +16,7 @@ AofWriter::~AofWriter() {
 void AofWriter::writeLine(const std::string& line) {
     std::scoped_lock lock(mutex_);
     file_ << line << '\n';
+    file_.flush();
     // No fsync: relies on OS page cache. Configurable policy is a polishing item.
 }
 
